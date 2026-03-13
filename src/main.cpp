@@ -36,7 +36,11 @@ Adafruit_MCP2515 mcp(mcp25125_config::PIN_CAN_CS,
 
 // CAN configuration
 static constexpr uint32_t CAN_BITRATE = 500000; // match your bus
-static constexpr uint32_t CAN_ID_TX = 0x123;
+static constexpr uint32_t CAN_ID_FL = 0x120; // Front Left  (speed + steer)
+static constexpr uint32_t CAN_ID_FR = 0x121; // Front Right (speed + steer)
+static constexpr uint32_t CAN_ID_RL = 0x122; // Rear Left   (speed + steer)
+static constexpr uint32_t CAN_ID_RR = 0x123; // Rear Right  (speed + steer)
+
 
 static uint8_t crc8_atm(const uint8_t* data, size_t len, uint8_t poly = 0x07, uint8_t init = 0x00) {
   uint8_t crc = init;
@@ -50,6 +54,22 @@ static uint8_t crc8_atm(const uint8_t* data, size_t len, uint8_t poly = 0x07, ui
   return crc;
 }
 
+void send_motor_command(uint32_t can_id, uint8_t seq, uint8_t flags, int16_t speed, int16_t steer) {
+  uint8_t data[8];
+  data[0] = 0xAA;
+  data[1] = 0x55;
+  data[2] = seq;
+  data[3] = flags;
+  data[4] = speed & 0xFF;
+  data[5] = (speed >> 8) & 0xFF;
+  data[6] = steer & 0xFF;
+  data[7] = (steer >> 8) & 0xFF;
+
+  mcp.beginPacket(can_id);
+  mcp.write(data, sizeof(data));
+  mcp.endPacket();
+}
+
 void send_can_packet(uint8_t seq,
                      uint8_t flags,
                      int16_t frontLeftSpeed, 
@@ -59,50 +79,17 @@ void send_can_packet(uint8_t seq,
                      int16_t rearLeftSpeed, 
                      int16_t rearLeftSteer, 
                      int16_t rearRightSpeed, 
-                     int16_t rearRightSteer, 
-                     uint8_t rx_crc) {
+                     int16_t rearRightSteer 
+                     ) {
 
-uint8_t data[21];
-// Start-of-frame
-data[0] = 0xAA;
-data[1] = 0x55;
-// Payload
-data[2] = seq;
-data[3] = flags;
-// Pack the int16 values into little-endian byte order
-data[4] = frontLeftSpeed & 0xFF;
-data[5] = (frontLeftSpeed >> 8) & 0xFF;
-
-data[6] = frontLeftSteer & 0xFF;
-data[7] = (frontLeftSteer >> 8) & 0xFF;
-
-data[8] = frontRightSpeed & 0xFF;
-data[9] = (frontRightSpeed >> 8) & 0xFF;
-
-data[10] = frontRightSteer & 0xFF;
-data[11] = (frontRightSteer >> 8) & 0xFF;
-
-data[12] = rearLeftSpeed & 0xFF;
-data[13] = (rearLeftSpeed >> 8) & 0xFF;
-
-data[14] = rearLeftSteer & 0xFF;
-data[15] = (rearLeftSteer >> 8) & 0xFF;
-
-data[16] = rearRightSpeed & 0xFF;
-data[17] = (rearRightSpeed >> 8) & 0xFF;
-
-data[18] = rearRightSteer & 0xFF;
-data[19] = (rearRightSteer >> 8) & 0xFF;
-
-data[20] = rx_crc;
-
-  mcp.beginPacket(CAN_ID_TX);
-  mcp.write(data, sizeof(data));
-  bool ok = mcp.endPacket();
-
-  if (!ok) {
-    Serial.println("CAN TX failed");
-  }
+// Front Left
+send_motor_command(CAN_ID_FL, seq, flags, frontLeftSpeed, frontLeftSteer);
+// Front Right
+send_motor_command(CAN_ID_FR, seq, flags, frontRightSpeed, frontRightSteer);
+// Rear Left
+send_motor_command(CAN_ID_RL, seq, flags, rearLeftSpeed, rearLeftSteer);
+// Rear Right
+send_motor_command(CAN_ID_RR, seq, flags, rearRightSpeed, rearRightSteer);
 }
 
 void setup() {
@@ -219,8 +206,8 @@ void loop() {
                                 rearLeftSpeed_f,
                                 rearLeftSteer_f,
                                 rearRightSpeed_f,
-                                rearRightSteer_f, 
-                                rx_crc);
+                                rearRightSteer_f 
+                                );
   
     pixel.setPixelColor(0, pixel.Color(0, 255, 0)); // green
     pixel.show();
