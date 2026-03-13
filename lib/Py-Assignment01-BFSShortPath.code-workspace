@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../../../Py-Assignment01-BFSShortPath"
+		},
+		{
+			"name": "pico_can",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}
