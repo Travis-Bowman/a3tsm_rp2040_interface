@@ -10,13 +10,7 @@
 // Byte 2:     Sequence number (uint8, 0-255, wraps around)
 // Byte 3:     Flags (uint8 bit field)
 // Byte 4-5:   frontLeftSpeed   (int16, little-endian, mm/s)
-// Byte 6-7:   frontLeftSteer   (int16, little-endian, mrad)
-// Byte 8-9:   frontRightSpeed  (int16, little-endian, mm/s)
-// Byte 10-11: frontRightSteer  (int16, little-endian, mrad)
-// Byte 12-13: rearLeftSpeed    (int16, little-endian, mm/s)
-// Byte 14-15: rearLeftSteer    (int16, little-endian, mrad)
-// Byte 16-17: rearRightSpeed   (int16, little-endian, mm/s)
-// Byte 18-19: rearRightSteer   (int16, little-endian, mrad)
+// Byte 6-7:   frontRightSpeed   (int16, little-endian, mm/s)
 // Byte 20:    CRC-8 checksum over bytes 2-19
 
 // CAN frame format (8 bytes, RP2040 -> motor controller):
@@ -24,12 +18,12 @@
 // Byte 1:   SOF byte 2 (0x55)
 // Byte 2:   Sequence number (uint8)
 // Byte 3:   Flags (uint8 bit field)
-// Byte 4:   Speed low byte  (int16, little-endian, mm/s)
-// Byte 5:   Speed high byte
-// Byte 6:   Steer low byte  (int16, little-endian, mrad)
-// Byte 7:   Steer high byte
-// CAN IDs: FL=0x120, FR=0x121, RL=0x122, RR=0x123 (TX)
-//          FL=0x220, FR=0x221, RL=0x222, RR=0x223 (RX feedback)
+// Byte 4:   left Speed low byte  (int16, little-endian, mm/s)
+// Byte 5:   left Speed high byte
+// Byte 6:   right Speed low byte  (int16, little-endian, mm/s)
+// Byte 7:   right Speed high byte
+// CAN IDs: FL=0x120, FR=0x121 (TX)
+//          FL=0x220, FR=0x221 (RX feedback)
 
 #include <Arduino.h>
 #include <Adafruit_MCP2515.h>
@@ -42,20 +36,16 @@ struct Motor{
   uint32_t can_id_tx;
   uint32_t can_id_rx;
   int16_t cmd_speed; // mm/s
-  int16_t cmd_steer; // mrad
 };
 
 struct MotorFeedback{
   int16_t actual_speed; // mm/s
-  int16_t actual_steer; // mrad
   bool fresh;
 };
 
-Motor motors[4] = {
-  {mcp25125_config::CAN_ID_FL_TX, mcp25125_config::CAN_ID_FL_RX, 0, 0},
-  {mcp25125_config::CAN_ID_FR_TX, mcp25125_config::CAN_ID_FR_RX, 0, 0},
-  {mcp25125_config::CAN_ID_RL_TX, mcp25125_config::CAN_ID_RL_RX, 0, 0},
-  {mcp25125_config::CAN_ID_RR_TX, mcp25125_config::CAN_ID_RR_RX, 0, 0}
+Motor motors[2] = {
+  {mcp25125_config::CAN_ID_FL_TX, mcp25125_config::CAN_ID_FL_RX, 0}, // TX ID, RX ID, initial speed
+  {mcp25125_config::CAN_ID_FR_TX, mcp25125_config::CAN_ID_FR_RX, 0} // TX ID, RX ID, initial speed
 };
 
 Adafruit_NeoPixel pixel(1, neopixel_config::NEOPIXEL_DATA_PIN, NEO_GRB + NEO_KHZ800);
@@ -78,27 +68,20 @@ static uint8_t crc8_atm(const uint8_t* data, size_t len, uint8_t poly = 0x07, ui
   return crc;
 }
 
-void send_motor_command(uint32_t can_id, uint8_t seq, uint8_t flags, int16_t speed, int16_t steer) {
+void send_can_packet(uint8_t seq, uint8_t flags) {
   uint8_t data[8];
   data[0] = 0xAA;
   data[1] = 0x55;
   data[2] = seq;
   data[3] = flags;
-  data[4] = speed & 0xFF;
-  data[5] = (speed >> 8) & 0xFF;
-  data[6] = steer & 0xFF;
-  data[7] = (steer >> 8) & 0xFF;
+  data[4] = motors[0].cmd_speed & 0xFF;         // left speed low
+  data[5] = (motors[0].cmd_speed >> 8) & 0xFF;  // left speed high
+  data[6] = motors[1].cmd_speed & 0xFF;         // right speed low
+  data[7] = (motors[1].cmd_speed >> 8) & 0xFF;  // right speed high
 
-  mcp.beginPacket(can_id);
+  mcp.beginPacket(mcp25125_config::CAN_ID_FL_TX);
   mcp.write(data, sizeof(data));
   mcp.endPacket();
-}
-
-void send_can_packet(uint8_t seq, uint8_t flags) {
-  for (int i = 0; i < 4; i++) {
-    send_motor_command(motors[i].can_id_tx, seq, flags,
-                       motors[i].cmd_speed, motors[i].cmd_steer);
-  }
 }
 // Returns true if a valid packet was received and motors[] updated
 bool read_serial_packet(uint8_t& seq, uint8_t& flags) {
@@ -124,22 +107,19 @@ bool read_serial_packet(uint8_t& seq, uint8_t& flags) {
 
   seq   = rest[0];
   flags = rest[1];
-  for (int i = 0; i < 4; i++) {
-    int j = 2 + i * 4;
+  for (int i = 0; i < 2; i++) {
+    int j = 2 + i * 2;  // 2 bytes per motor (speed only, no steer)
     motors[i].cmd_speed = (int16_t)(rest[j]   | (rest[j+1] << 8));
-    motors[i].cmd_steer = (int16_t)(rest[j+2] | (rest[j+3] << 8));
   }
   return true;
 }
 
 void print_motor_commands() {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 2; i++) {
     Serial.print("Motor ");
     Serial.print(i);
     Serial.print(": speed=");
     Serial.print(motors[i].cmd_speed);
-    Serial.print(" steer=");
-    Serial.println(motors[i].cmd_steer);
   }
 }
 
