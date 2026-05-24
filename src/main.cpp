@@ -4,14 +4,14 @@
 
 // ********************
 
-// Serial packet format (21 bytes total, host -> RP2040):
+// Serial packet format (9 bytes total, host -> RP2040):
 // Byte 0:     SOF byte 1 (0xAA)
 // Byte 1:     SOF byte 2 (0x55)
 // Byte 2:     Sequence number (uint8, 0-255, wraps around)
 // Byte 3:     Flags (uint8 bit field)
 // Byte 4-5:   frontLeftSpeed   (int16, little-endian, mm/s)
-// Byte 6-7:   frontRightSpeed   (int16, little-endian, mm/s)
-// Byte 20:    CRC-8 checksum over bytes 2-19
+// Byte 6-7:   frontRightSpeed  (int16, little-endian, mm/s)
+// Byte 8:     CRC-8 checksum over bytes 2-7
 
 // CAN frame format (8 bytes, RP2040 -> motor controller):
 // Byte 0:   SOF byte 1 (0xAA)
@@ -82,6 +82,10 @@ void send_can_packet(uint8_t seq, uint8_t flags) {
   mcp.beginPacket(mcp25125_config::CAN_ID_FL_TX);
   mcp.write(data, sizeof(data));
   mcp.endPacket();
+
+  mcp.beginPacket(mcp25125_config::CAN_ID_FR_TX);
+  mcp.write(data, sizeof(data));
+  mcp.endPacket();
 }
 // Returns true if a valid packet was received and motors[] updated
 bool read_serial_packet(uint8_t& seq, uint8_t& flags) {
@@ -92,11 +96,11 @@ bool read_serial_packet(uint8_t& seq, uint8_t& flags) {
   int b1 = Serial.read();
   if (b1 != 0x55) return false;
 
-  uint8_t rest[19];
-  if (Serial.readBytes((char*)rest, 19) != 19) return false;
+  uint8_t rest[7];
+  if (Serial.readBytes((char*)rest, 7) != 7) return false;
 
-  uint8_t rx_crc = rest[18];
-  uint8_t calc   = crc8_atm(rest, 18);
+  uint8_t rx_crc = rest[6];
+  uint8_t calc   = crc8_atm(rest, 6);
   if (calc != rx_crc) {
     Serial.print("CRC BAD rx=");
     Serial.print(rx_crc);
@@ -125,7 +129,7 @@ void print_motor_commands() {
 
 void setup() {
 
-  Serial.begin(115200);
+  Serial.begin(921600);
   while (!Serial) { delay(10); }
 
   Serial.println("Init CAN...");
