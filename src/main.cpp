@@ -108,8 +108,11 @@ void send_can_packet(uint8_t seq, uint8_t flags) {
 bool read_serial_packet(uint8_t& seq, uint8_t& flags) {
   int b0 = Serial.read();
   if (b0 != 0xAA) return false;
- 
-  while (Serial.available() == 0) {}
+
+  unsigned long t0 = millis();
+  while (Serial.available() == 0) {
+    if (millis() - t0 > 5) return false;  // bail, resync next loop
+  }
   int b1 = Serial.read();
   if (b1 != 0x55) return false;
  
